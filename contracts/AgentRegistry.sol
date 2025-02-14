@@ -7,10 +7,21 @@ import "./interfaces/IRegistry.sol";
 /// @title Agent Registry - Smart contract for registering agents
 /// @author Aleksandr Kuperman - <aleksandr.kuperman@valory.xyz>
 contract AgentRegistry is UnitRegistry {
+    event RegistrationModeUpdated(bool isOpen);
+    event RegistrationFeeUpdated(uint256 newFee);
+    event BlacklistUpdated(address account, bool isBlacklisted);
+    event FeesWithdrawn(uint256 amount);
+
     // Component registry
     address public immutable componentRegistry;
     // Agent registry version number
     string public constant VERSION = "1.0.0";
+    // Registration fee
+    uint256 public registrationFee;
+    // Registration mode (true = open registration, false = manager only)
+    bool public isOpenRegistration;
+    // Blacklisted addresses
+    mapping(address => bool) public blacklist;
 
     /// @dev Agent registry constructor.
     /// @param _name Agent registry contract name.
@@ -24,6 +35,49 @@ contract AgentRegistry is UnitRegistry {
         baseURI = _baseURI;
         componentRegistry = _componentRegistry;
         owner = msg.sender;
+        isOpenRegistration = true; // Default to open registration
+    }
+
+    /// @dev Sets the registration fee.
+    /// @param newFee New registration fee.
+    function setRegistrationFee(uint256 newFee) external {
+        if (msg.sender != owner) {
+            revert OwnerOnly(msg.sender, owner);
+        }
+        registrationFee = newFee;
+        emit RegistrationFeeUpdated(newFee);
+    }
+
+    /// @dev Sets the registration mode.
+    /// @param isOpen True for open registration, false for manager only.
+    function setRegistrationMode(bool isOpen) external {
+        if (msg.sender != owner) {
+            revert OwnerOnly(msg.sender, owner);
+        }
+        isOpenRegistration = isOpen;
+        emit RegistrationModeUpdated(isOpen);
+    }
+
+    /// @dev Updates blacklist status for an address.
+    /// @param account Address to update.
+    /// @param isBlacklisted True to blacklist, false to remove from blacklist.
+    function updateBlacklist(address account, bool isBlacklisted) external {
+        if (msg.sender != owner) {
+            revert OwnerOnly(msg.sender, owner);
+        }
+        blacklist[account] = isBlacklisted;
+        emit BlacklistUpdated(account, isBlacklisted);
+    }
+
+    /// @dev Withdraws collected fees.
+    function withdrawFees() external {
+        if (msg.sender != owner) {
+            revert OwnerOnly(msg.sender, owner);
+        }
+        uint256 amount = address(this).balance;
+        (bool success, ) = owner.call{value: amount}("");
+        require(success, "Fee withdrawal failed");
+        emit FeesWithdrawn(amount);
     }
 
     /// @dev Checks provided component dependencies.
@@ -43,6 +97,30 @@ contract AgentRegistry is UnitRegistry {
             }
             lastId = dependencies[iDep];
         }
+    }
+
+    /// @dev Creates a new agent.
+    /// @param unitOwner Owner of the agent.
+    /// @param unitHash IPFS hash of the agent.
+    /// @param dependencies Set of component dependencies.
+    /// @return unitId The id of the created agent.
+    function create(address unitOwner, bytes32 unitHash, uint32[] memory dependencies)
+        public virtual override payable returns (uint256 unitId)
+    {
+        // Check registration mode and requirements
+        if (isOpenRegistration) {
+            // Open registration mode
+            require(msg.value >= registrationFee, "Insufficient registration fee");
+            require(!blacklist[msg.sender], "Address is blacklisted");
+        } else {
+            // Manager only mode
+            if (msg.sender != manager) {
+                revert ManagerOnly(msg.sender, manager);
+            }
+        }
+
+        // Call parent create function
+        return super.create(unitOwner, unitHash, dependencies);
     }
 
     /// @dev Gets linearized set of subcomponents of a provided unit Id and a type of a component.

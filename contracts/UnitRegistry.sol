@@ -47,18 +47,13 @@ abstract contract UnitRegistry is GenericRegistry {
     /// @param dependencies Set of unit dependencies in a sorted ascending order (unit Ids).
     /// @return unitId The id of a minted unit.
     function create(address unitOwner, bytes32 unitHash, uint32[] memory dependencies)
-        external virtual returns (uint256 unitId)
+        public virtual payable returns (uint256 unitId)
     {
         // Reentrancy guard
         if (_locked > 1) {
             revert ReentrancyGuard();
         }
         _locked = 2;
-
-        // Check for the manager privilege for a unit creation
-        if (manager != msg.sender) {
-            revert ManagerOnly(msg.sender, manager);
-        }
 
         // Checks for a non-zero owner address
         if(unitOwner == address(0)) {
@@ -87,11 +82,6 @@ abstract contract UnitRegistry is GenericRegistry {
         // Self contract (unit registry) can only call subcomponents calculation from the component level
         uint32[] memory subComponentIds = _calculateSubComponents(UnitType.Component, dependencies);
         // We need to add a current component Id to the set of subcomponents if the unit is a component
-        // For example, if component 3 (c3) has dependencies of [c1, c2], then the subcomponents will return [c1, c2].
-        // The resulting set will be [c1, c2, c3]. So we write into the map of component subcomponents: c3=>[c1, c2, c3].
-        // This is done such that the subcomponents start getting explored, and when the agent calls its subcomponents,
-        // it would have [c1, c2, c3] right away instead of adding c3 manually and then (for services) checking
-        // if another agent also has c3 as a component dependency. The latter will consume additional computation.
         if (unitType == UnitType.Component) {
             uint256 numSubComponents = subComponentIds.length;
             uint32[] memory addSubComponentIds = new uint32[](numSubComponents + 1);

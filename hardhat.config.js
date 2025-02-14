@@ -1,8 +1,8 @@
 /*global process*/
 
 require("hardhat-contract-sizer");
-require("hardhat-deploy");
-require("hardhat-deploy-ethers");
+//require("hardhat-deploy");
+//require("hardhat-deploy-ethers");
 require("hardhat-gas-reporter");
 //require("hardhat-tracer");
 require("@nomicfoundation/hardhat-chai-matchers");
