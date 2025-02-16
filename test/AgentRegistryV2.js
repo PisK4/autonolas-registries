@@ -10,12 +10,28 @@ describe("AgentRegistry V2", function () {
     let manager;
     let user1;
     let user2;
+    let mockTokenImplementation;
+    let mockAssetToken;
+    let mockRouter;
     const componentHash = "0x" + "5".repeat(64);
     const agentHash = "0x" + "9".repeat(64);
     const registrationFee = ethers.utils.parseEther("0.1"); // 0.1 ETH
+    const applicationThreshold = ethers.utils.parseEther("1.0"); // 1.0 ETH
 
     beforeEach(async function () {
         [owner, manager, user1, user2] = await ethers.getSigners();
+
+        // Deploy mock contracts
+        const MockToken = await ethers.getContractFactory("MockToken");
+        mockTokenImplementation = await MockToken.deploy();
+        await mockTokenImplementation.deployed();
+
+        mockAssetToken = await MockToken.deploy();
+        await mockAssetToken.deployed();
+
+        const MockRouter = await ethers.getContractFactory("MockRouter");
+        mockRouter = await MockRouter.deploy();
+        await mockRouter.deployed();
 
         const ComponentRegistry = await ethers.getContractFactory("ComponentRegistry");
         componentRegistry = await ComponentRegistry.deploy("agent components", "MECHCOMP",
@@ -31,6 +47,26 @@ describe("AgentRegistry V2", function () {
         await componentRegistry.changeManager(manager.address);
         await componentRegistry.connect(manager).create(user1.address, componentHash, []);
         await agentRegistry.setRegistrationFee(registrationFee);
+
+        // Setup token system
+        await agentRegistry.setTokenSystem(
+            mockTokenImplementation.address,
+            mockAssetToken.address,
+            mockRouter.address,
+            applicationThreshold
+        );
+
+        // Setup default token parameters
+        const defaultTokenParams = {
+            maxSupply: ethers.utils.parseEther("1000000"),
+            lpSupply: ethers.utils.parseEther("500000"),
+            vaultSupply: ethers.utils.parseEther("100000"),
+            maxTokensPerWallet: ethers.utils.parseEther("10000"),
+            maxTokensPerTxn: ethers.utils.parseEther("1000"),
+            botProtectionDurationInSeconds: 60,
+            vault: owner.address
+        };
+        await agentRegistry.setDefaultTokenParams(defaultTokenParams);
     });
 
     describe("Registration Mode Management", function () {
@@ -270,6 +306,223 @@ describe("AgentRegistry V2", function () {
                     value: registrationFee
                 })
             ).to.be.revertedWithCustomError(agentRegistry, "ComponentNotFound");
+        });
+    });
+
+    describe("Token System Configuration", function () {
+        it("Should allow owner to set token system parameters", async function () {
+            const newTokenImpl = mockTokenImplementation.address;
+            const newAssetToken = mockAssetToken.address;
+            const newRouter = mockRouter.address;
+            const newThreshold = ethers.utils.parseEther("2.0");
+
+            await agentRegistry.setTokenSystem(newTokenImpl, newAssetToken, newRouter, newThreshold);
+
+            expect(await agentRegistry.tokenImplementation()).to.equal(newTokenImpl);
+            expect(await agentRegistry.assetToken()).to.equal(newAssetToken);
+            expect(await agentRegistry.uniswapRouter()).to.equal(newRouter);
+            expect(await agentRegistry.applicationThreshold()).to.equal(newThreshold);
+        });
+
+        it("Should not allow non-owner to set token system parameters", async function () {
+            await expect(
+                agentRegistry.connect(user1).setTokenSystem(
+                    mockTokenImplementation.address,
+                    mockAssetToken.address,
+                    mockRouter.address,
+                    applicationThreshold
+                )
+            ).to.be.revertedWithCustomError(agentRegistry, "OwnerOnly");
+        });
+
+        it("Should allow owner to set default token parameters", async function () {
+            const newParams = {
+                maxSupply: ethers.utils.parseEther("2000000"),
+                lpSupply: ethers.utils.parseEther("1000000"),
+                vaultSupply: ethers.utils.parseEther("200000"),
+                maxTokensPerWallet: ethers.utils.parseEther("20000"),
+                maxTokensPerTxn: ethers.utils.parseEther("2000"),
+                botProtectionDurationInSeconds: 120,
+                vault: user1.address
+            };
+
+            await agentRegistry.setDefaultTokenParams(newParams);
+            const params = await agentRegistry.defaultTokenParams();
+
+            expect(params.maxSupply).to.equal(newParams.maxSupply);
+            expect(params.lpSupply).to.equal(newParams.lpSupply);
+            expect(params.vaultSupply).to.equal(newParams.vaultSupply);
+            expect(params.maxTokensPerWallet).to.equal(newParams.maxTokensPerWallet);
+            expect(params.maxTokensPerTxn).to.equal(newParams.maxTokensPerTxn);
+            expect(params.botProtectionDurationInSeconds).to.equal(newParams.botProtectionDurationInSeconds);
+            expect(params.vault).to.equal(newParams.vault);
+        });
+    });
+
+    describe("Agent Application System", function () {
+        let agentId;
+        let applicationId;
+
+        beforeEach(async function () {
+            // Create an agent first
+            const tx = await agentRegistry.connect(user1).create(user1.address, agentHash, [1], {
+                value: registrationFee
+            });
+            const receipt = await tx.wait();
+            const createEvent = receipt.events.find(e => e.event === "CreateUnit");
+            agentId = createEvent.args.unitId;
+
+            // Set application threshold
+            await agentRegistry.setTokenSystem(
+                mockTokenImplementation.address,
+                mockAssetToken.address,
+                mockRouter.address,
+                ethers.utils.parseEther("1.0")
+            );
+
+            // Mint some asset tokens for testing
+            await mockAssetToken.mint(user1.address, ethers.utils.parseEther("10.0"));
+            await mockAssetToken.connect(user1).approve(agentRegistry.address, ethers.utils.parseEther("10.0"));
+        });
+
+        it("Should allow agent owner to create an application with asset token deposit", async function () {
+            const tx = await agentRegistry.connect(user1).proposeAgent(agentId, "Test Agent", "TEST");
+            const receipt = await tx.wait();
+            
+            const event = receipt.events.find(e => e.event === "AgentProposed");
+            expect(event).to.not.be.undefined;
+            expect(event.args.agentId).to.equal(agentId);
+            
+            applicationId = event.args.proposalId;
+            const application = await agentRegistry.applications(applicationId);
+            
+            expect(application.agentId).to.equal(agentId);
+            expect(application.proposer).to.equal(user1.address);
+            expect(application.name).to.equal("Test Agent");
+            expect(application.symbol).to.equal("TEST");
+            expect(application.status).to.equal(1); // Pending
+            expect(application.withdrawableAmount).to.equal(ethers.utils.parseEther("1.0"));
+
+            // Check asset token transfer
+            expect(await mockAssetToken.balanceOf(agentRegistry.address)).to.equal(ethers.utils.parseEther("1.0"));
+        });
+
+        it("Should not allow application without sufficient asset tokens", async function () {
+            // Reset asset token balance
+            await mockAssetToken.connect(user1).transfer(owner.address, await mockAssetToken.balanceOf(user1.address));
+            
+            await expect(
+                agentRegistry.connect(user1).proposeAgent(agentId, "Test Agent", "TEST")
+            ).to.be.revertedWith("Insufficient asset token");
+        });
+
+        it("Should not allow application without sufficient asset token allowance", async function () {
+            // Reset allowance
+            await mockAssetToken.connect(user1).approve(agentRegistry.address, 0);
+            
+            await expect(
+                agentRegistry.connect(user1).proposeAgent(agentId, "Test Agent", "TEST")
+            ).to.be.revertedWith("Insufficient asset token allowance");
+        });
+
+        it("Should allow proposer to withdraw pending application", async function () {
+            // Create application
+            const tx = await agentRegistry.connect(user1).proposeAgent(agentId, "Test Agent", "TEST");
+            const receipt = await tx.wait();
+            applicationId = receipt.events.find(e => e.event === "AgentProposed").args.proposalId;
+
+            // Check initial state
+            const initialBalance = await mockAssetToken.balanceOf(user1.address);
+            
+            // Withdraw
+            await agentRegistry.connect(user1).withdraw(applicationId);
+            
+            // Check final state
+            const application = await agentRegistry.applications(applicationId);
+            expect(application.status).to.equal(3); // Withdrawn
+            expect(application.withdrawableAmount).to.equal(0);
+            
+            // Check asset token return
+            expect(await mockAssetToken.balanceOf(user1.address)).to.equal(
+                initialBalance.add(ethers.utils.parseEther("1.0"))
+            );
+        });
+
+        it("Should not allow non-proposer to withdraw", async function () {
+            // Create application
+            const tx = await agentRegistry.connect(user1).proposeAgent(agentId, "Test Agent", "TEST");
+            const receipt = await tx.wait();
+            applicationId = receipt.events.find(e => e.event === "AgentProposed").args.proposalId;
+
+            // Try to withdraw as non-proposer
+            await expect(
+                agentRegistry.connect(user2).withdraw(applicationId)
+            ).to.be.revertedWith("Not proposer");
+        });
+
+        it("Should execute application and create liquidity pool with deposited assets", async function () {
+            // Create application
+            const tx = await agentRegistry.connect(user1).proposeAgent(agentId, "Test Agent", "TEST");
+            const receipt = await tx.wait();
+            applicationId = receipt.events.find(e => e.event === "AgentProposed").args.proposalId;
+
+            // Execute application
+            await agentRegistry.connect(user1).executeApplication(applicationId);
+            
+            // Check application state
+            const application = await agentRegistry.applications(applicationId);
+            expect(application.status).to.equal(2); // Executed
+            expect(application.token).to.not.equal(ethers.constants.AddressZero);
+            expect(application.liquidityPool).to.not.equal(ethers.constants.AddressZero);
+            expect(application.withdrawableAmount).to.equal(0);
+        });
+
+        it("Should not allow executing already executed application", async function () {
+            // Create and execute application
+            const tx = await agentRegistry.connect(user1).proposeAgent(agentId, "Test Agent", "TEST");
+            const receipt = await tx.wait();
+            applicationId = receipt.events.find(e => e.event === "AgentProposed").args.proposalId;
+            
+            await agentRegistry.connect(user1).executeApplication(applicationId);
+
+            // Try to execute again
+            await expect(
+                agentRegistry.connect(user1).executeApplication(applicationId)
+            ).to.be.revertedWith("Invalid application status");
+        });
+
+        it("Should not allow withdrawing executed application", async function () {
+            // Create and execute application
+            const tx = await agentRegistry.connect(user1).proposeAgent(agentId, "Test Agent", "TEST");
+            const receipt = await tx.wait();
+            applicationId = receipt.events.find(e => e.event === "AgentProposed").args.proposalId;
+            
+            await agentRegistry.connect(user1).executeApplication(applicationId);
+
+            // Try to withdraw
+            await expect(
+                agentRegistry.connect(user1).withdraw(applicationId)
+            ).to.be.revertedWith("Application not pending");
+        });
+
+        it("Should correctly retrieve application by agent ID", async function () {
+            // Create application
+            const tx = await agentRegistry.connect(user1).proposeAgent(agentId, "Test Agent", "TEST");
+            const receipt = await tx.wait();
+            applicationId = receipt.events.find(e => e.event === "AgentProposed").args.proposalId;
+
+            const application = await agentRegistry.getAgentApplication(agentId);
+            expect(application.name).to.equal("Test Agent");
+            expect(application.symbol).to.equal("TEST");
+            expect(application.proposer).to.equal(user1.address);
+            expect(application.withdrawableAmount).to.equal(ethers.utils.parseEther("1.0"));
+        });
+
+        it("Should return empty application for non-existent agent applications", async function () {
+            const application = await agentRegistry.getAgentApplication(999);
+            expect(application.proposer).to.equal(ethers.constants.AddressZero);
+            expect(application.status).to.equal(0); // None
+            expect(application.withdrawableAmount).to.equal(0);
         });
     });
 }); 
