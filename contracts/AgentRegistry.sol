@@ -5,9 +5,11 @@ import "./UnitRegistry.sol";
 import "./interfaces/IRegistry.sol";
 import "./pool/IUniswapV2Factory.sol";
 import "./pool/IUniswapV2Router02.sol";
+import "./AgentToken.sol";
 import "@openzeppelin/contracts/proxy/Clones.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "./interfaces/IERC20Config.sol";
 
 /// @title Agent Registry - Smart contract for registering agents
 /// @author Aleksandr Kuperman - <aleksandr.kuperman@valory.xyz>
@@ -109,6 +111,15 @@ contract AgentRegistry is UnitRegistry {
         if (msg.sender != owner) {
             revert OwnerOnly(msg.sender, owner);
         }
+        if (_tokenImplementation == address(0)) {
+            revert ZeroAddress();
+        }
+        if (_assetToken == address(0)) {
+            revert ZeroAddress();
+        }
+        if (_uniswapRouter == address(0)) {
+            revert ZeroAddress();
+        }
         tokenImplementation = _tokenImplementation;
         assetToken = _assetToken;
         uniswapRouter = _uniswapRouter;
@@ -120,6 +131,24 @@ contract AgentRegistry is UnitRegistry {
     function setDefaultTokenParams(TokenParams memory params) external {
         if (msg.sender != owner) {
             revert OwnerOnly(msg.sender, owner);
+        }
+        if (params.maxSupply == 0) {
+            revert ZeroValue();
+        }
+        if (params.lpSupply == 0) {
+            revert ZeroValue();
+        }
+        if (params.vaultSupply == 0) {
+            revert ZeroValue();
+        }
+        if (params.maxTokensPerWallet == 0) {
+            revert ZeroValue();
+        }
+        if (params.maxTokensPerTxn == 0) {
+            revert ZeroValue();
+        }
+        if (params.vault == address(0)) {
+            revert ZeroAddress();
         }
         defaultTokenParams = params;
     }
@@ -340,22 +369,55 @@ contract AgentRegistry is UnitRegistry {
     /// @return instance The address of the created token contract.
     function _createToken(string memory name, string memory symbol) internal returns (address instance) {
         instance = Clones.clone(tokenImplementation);
-        // Initialize token with default parameters
-        // Note: This requires the token contract to have a specific initialize function
-        // that matches our parameter structure
-        bytes memory initData = abi.encode(
-            name,
-            symbol,
-            defaultTokenParams.maxSupply,
-            defaultTokenParams.lpSupply,
-            defaultTokenParams.vaultSupply,
-            defaultTokenParams.maxTokensPerWallet,
-            defaultTokenParams.maxTokensPerTxn,
-            defaultTokenParams.botProtectionDurationInSeconds,
-            defaultTokenParams.vault
+        
+        // Prepare initialization parameters
+        address[3] memory integrationAddresses = [
+            owner,  // admin - 用于设置token所有者
+            address(uniswapRouter),  // router
+            assetToken  // pairToken
+        ];
+
+        // Encode base parameters (name, symbol)
+        bytes memory baseParams = abi.encode(name, symbol);
+
+        // Encode supply parameters
+        IERC20Config.ERC20SupplyParameters memory supplyParams = IERC20Config.ERC20SupplyParameters({
+            maxSupply: defaultTokenParams.maxSupply,
+            lpSupply: defaultTokenParams.lpSupply,
+            vaultSupply: defaultTokenParams.vaultSupply,
+            maxTokensPerWallet: defaultTokenParams.maxTokensPerWallet,
+            maxTokensPerTxn: defaultTokenParams.maxTokensPerTxn,
+            botProtectionDurationInSeconds: defaultTokenParams.botProtectionDurationInSeconds,
+            vault: defaultTokenParams.vault
+        });
+        bytes memory supplyParamsEncoded = abi.encode(supplyParams);
+
+        // Encode tax parameters
+        IERC20Config.ERC20TaxParameters memory taxParams = IERC20Config.ERC20TaxParameters({
+            projectBuyTaxBasisPoints: 500,  // 5%
+            projectSellTaxBasisPoints: 500, // 5%
+            taxSwapThresholdBasisPoints: 100, // 1%
+            projectTaxRecipient: owner
+        });
+        bytes memory taxParamsEncoded = abi.encode(taxParams);
+
+        // Initialize the token
+        (bool success, bytes memory returnData) = instance.call(
+            abi.encodeWithSignature(
+                "initialize(address[3],bytes,bytes,bytes)",
+                integrationAddresses,
+                baseParams,
+                supplyParamsEncoded,
+                taxParamsEncoded
+            )
         );
-        (bool success, ) = instance.call(abi.encodeWithSignature("initialize(bytes)", initData));
-        require(success, "Token initialization failed");
+        if (!success) {
+            // 如果调用失败，我们需要将错误信息从返回数据中提取出来
+            assembly {
+                let returnDataSize := mload(returnData)
+                revert(add(32, returnData), returnDataSize)
+            }
+        }
         return instance;
     }
 
@@ -363,16 +425,11 @@ contract AgentRegistry is UnitRegistry {
     /// @param token Token address.
     /// @return liquidityPool The address of the created liquidity pool.
     function _createLiquidityPool(address token) internal returns (address liquidityPool) {
-        IUniswapV2Factory factory = IUniswapV2Factory(
-            IUniswapV2Router02(uniswapRouter).factory()
-        );
-        
-        require(
-            factory.getPair(token, assetToken) == address(0),
-            "Pool already exists"
-        );
-
-        liquidityPool = factory.createPair(token, assetToken);
+        IUniswapV2Factory factory = IUniswapV2Factory(IUniswapV2Router02(uniswapRouter).factory());
+        liquidityPool = factory.getPair(token, assetToken);
+        if (liquidityPool == address(0)) {
+            liquidityPool = factory.createPair(token, assetToken);
+        }
         return liquidityPool;
     }
 

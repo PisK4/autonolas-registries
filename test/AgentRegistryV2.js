@@ -22,16 +22,24 @@ describe("AgentRegistry V2", function () {
         [owner, manager, user1, user2] = await ethers.getSigners();
 
         // Deploy mock contracts
-        const MockToken = await ethers.getContractFactory("MockToken");
-        mockTokenImplementation = await MockToken.deploy();
+        const AgentToken = await ethers.getContractFactory("AgentToken");
+        mockTokenImplementation = await AgentToken.deploy();
         await mockTokenImplementation.deployed();
 
+        const MockToken = await ethers.getContractFactory("MockToken");
         mockAssetToken = await MockToken.deploy();
         await mockAssetToken.deployed();
 
+        const MockFactory = await ethers.getContractFactory("MockFactory");
+        const mockFactory = await MockFactory.deploy();
+        await mockFactory.deployed();
+
         const MockRouter = await ethers.getContractFactory("MockRouter");
-        mockRouter = await MockRouter.deploy();
+        mockRouter = await MockRouter.deploy(mockFactory.address);
         await mockRouter.deployed();
+
+        // Setup mock factory in router
+        await mockRouter.setMockPair(ethers.constants.AddressZero); // Initially no pair exists
 
         const ComponentRegistry = await ethers.getContractFactory("ComponentRegistry");
         componentRegistry = await ComponentRegistry.deploy("agent components", "MECHCOMP",
@@ -58,7 +66,7 @@ describe("AgentRegistry V2", function () {
 
         // Setup default token parameters
         const defaultTokenParams = {
-            maxSupply: ethers.utils.parseEther("1000000"),
+            maxSupply: ethers.utils.parseEther("600000"),  // 修改为 lpSupply + vaultSupply
             lpSupply: ethers.utils.parseEther("500000"),
             vaultSupply: ethers.utils.parseEther("100000"),
             maxTokensPerWallet: ethers.utils.parseEther("10000"),
@@ -66,7 +74,40 @@ describe("AgentRegistry V2", function () {
             botProtectionDurationInSeconds: 60,
             vault: owner.address
         };
+
         await agentRegistry.setDefaultTokenParams(defaultTokenParams);
+
+        // Store these values for later use in tests
+        this.defaultTaxParams = {
+            projectBuyTaxBasisPoints: 500,  // 5%
+            projectSellTaxBasisPoints: 500, // 5%
+            taxSwapThresholdBasisPoints: 100, // 1%
+            projectTaxRecipient: owner.address
+        };
+
+        this.defaultBaseParams = {
+            name: "Test Token",
+            symbol: "TEST"
+        };
+
+        this.encodedBaseParams = ethers.utils.defaultAbiCoder.encode(
+            ["string", "string"],
+            [this.defaultBaseParams.name, this.defaultBaseParams.symbol]
+        );
+
+        this.encodedSupplyParams = ethers.utils.defaultAbiCoder.encode(
+            ["tuple(uint256 maxSupply, uint256 lpSupply, uint256 vaultSupply, uint256 maxTokensPerWallet, uint256 maxTokensPerTxn, uint256 botProtectionDurationInSeconds, address vault)"],
+            [defaultTokenParams]
+        );
+
+        this.encodedTaxParams = ethers.utils.defaultAbiCoder.encode(
+            ["tuple(uint256 projectBuyTaxBasisPoints, uint256 projectSellTaxBasisPoints, uint256 taxSwapThresholdBasisPoints, address projectTaxRecipient)"],
+            [this.defaultTaxParams]
+        );
+
+        // Mint some tokens to test accounts
+        await mockAssetToken.mint(user1.address, ethers.utils.parseEther("10.0"));
+        await mockAssetToken.mint(user2.address, ethers.utils.parseEther("10.0"));
     });
 
     describe("Registration Mode Management", function () {
@@ -466,8 +507,13 @@ describe("AgentRegistry V2", function () {
             const receipt = await tx.wait();
             applicationId = receipt.events.find(e => e.event === "AgentProposed").args.proposalId;
 
+            // Create a mock pair address
+            const mockPairAddress = ethers.Wallet.createRandom().address;
+            await mockRouter.setMockPair(mockPairAddress);
+
             // Execute application
-            await agentRegistry.connect(user1).executeApplication(applicationId);
+            const executeTx = await agentRegistry.connect(user1).executeApplication(applicationId);
+            const executeReceipt = await executeTx.wait();
             
             // Check application state
             const application = await agentRegistry.applications(applicationId);
@@ -483,6 +529,10 @@ describe("AgentRegistry V2", function () {
             const receipt = await tx.wait();
             applicationId = receipt.events.find(e => e.event === "AgentProposed").args.proposalId;
             
+            // Create a mock pair address
+            const mockPairAddress = ethers.Wallet.createRandom().address;
+            await mockRouter.setMockPair(mockPairAddress);
+            
             await agentRegistry.connect(user1).executeApplication(applicationId);
 
             // Try to execute again
@@ -496,6 +546,10 @@ describe("AgentRegistry V2", function () {
             const tx = await agentRegistry.connect(user1).proposeAgent(agentId, "Test Agent", "TEST");
             const receipt = await tx.wait();
             applicationId = receipt.events.find(e => e.event === "AgentProposed").args.proposalId;
+            
+            // Create a mock pair address
+            const mockPairAddress = ethers.Wallet.createRandom().address;
+            await mockRouter.setMockPair(mockPairAddress);
             
             await agentRegistry.connect(user1).executeApplication(applicationId);
 
@@ -523,6 +577,184 @@ describe("AgentRegistry V2", function () {
             expect(application.proposer).to.equal(ethers.constants.AddressZero);
             expect(application.status).to.equal(0); // None
             expect(application.withdrawableAmount).to.equal(0);
+        });
+    });
+
+    describe("Event Emissions", function () {
+        it("Should emit correct events for registration mode changes", async function () {
+            await expect(agentRegistry.setRegistrationMode(false))
+                .to.emit(agentRegistry, "RegistrationModeUpdated")
+                .withArgs(false);
+
+            await expect(agentRegistry.setRegistrationMode(true))
+                .to.emit(agentRegistry, "RegistrationModeUpdated")
+                .withArgs(true);
+        });
+
+        it("Should emit correct events for fee changes", async function () {
+            const newFee = ethers.utils.parseEther("0.2");
+            await expect(agentRegistry.setRegistrationFee(newFee))
+                .to.emit(agentRegistry, "RegistrationFeeUpdated")
+                .withArgs(newFee);
+        });
+
+        it("Should emit correct events for blacklist updates", async function () {
+            await expect(agentRegistry.updateBlacklist(user1.address, true))
+                .to.emit(agentRegistry, "BlacklistUpdated")
+                .withArgs(user1.address, true);
+        });
+
+        it("Should emit correct events for agent creation", async function () {
+            const tx = await agentRegistry.connect(user1).create(user1.address, agentHash, [1], {
+                value: registrationFee
+            });
+            await expect(tx)
+                .to.emit(agentRegistry, "CreateUnit")
+                .withArgs(1, 1, agentHash); // unitId, UnitType.Agent (1), hash
+        });
+
+        it("Should emit correct events for agent application", async function () {
+            // First create an agent
+            const createTx = await agentRegistry.connect(user1).create(user1.address, agentHash, [1], {
+                value: registrationFee
+            });
+            const receipt = await createTx.wait();
+            const createEvent = receipt.events.find(e => e.event === "CreateUnit");
+            const agentId = createEvent.args.unitId;
+
+            // Mint and approve tokens
+            await mockAssetToken.mint(user1.address, applicationThreshold);
+            await mockAssetToken.connect(user1).approve(agentRegistry.address, applicationThreshold);
+
+            // Propose agent
+            await expect(agentRegistry.connect(user1).proposeAgent(agentId, "Test", "TST"))
+                .to.emit(agentRegistry, "AgentProposed")
+                .withArgs(agentId, 1); // agentId, applicationId
+
+            // Create a mock pair address
+            const mockPairAddress = ethers.Wallet.createRandom().address;
+            await mockRouter.setMockPair(mockPairAddress);
+
+            // Execute application
+            await expect(agentRegistry.connect(user1).executeApplication(1))
+                .to.emit(agentRegistry, "ProposalExecuted")
+                .withArgs(1)
+                .to.emit(agentRegistry, "TokenCreated");
+        });
+    });
+
+    describe("State Transitions", function () {
+        let agentId;
+        let applicationId;
+
+        beforeEach(async function () {
+            // Create agent
+            const createTx = await agentRegistry.connect(user1).create(user1.address, agentHash, [1], {
+                value: registrationFee
+            });
+            const receipt = await createTx.wait();
+            const createEvent = receipt.events.find(e => e.event === "CreateUnit");
+            agentId = createEvent.args.unitId;
+
+            // Setup tokens
+            await mockAssetToken.mint(user1.address, applicationThreshold);
+            await mockAssetToken.connect(user1).approve(agentRegistry.address, applicationThreshold);
+        });
+
+        it("Should correctly transition through application states", async function () {
+            // Initial state
+            let application = await agentRegistry.getAgentApplication(agentId);
+            expect(application.status).to.equal(0); // None
+
+            // Create application
+            const proposeTx = await agentRegistry.connect(user1).proposeAgent(agentId, "Test", "TST");
+            const proposeReceipt = await proposeTx.wait();
+            applicationId = proposeReceipt.events.find(e => e.event === "AgentProposed").args.proposalId;
+            
+            application = await agentRegistry.getAgentApplication(agentId);
+            expect(application.status).to.equal(1); // Pending
+
+            // Create a mock pair address
+            const mockPairAddress = ethers.Wallet.createRandom().address;
+            await mockRouter.setMockPair(mockPairAddress);
+
+            // Execute application
+            await agentRegistry.connect(user1).executeApplication(applicationId);
+            application = await agentRegistry.getAgentApplication(agentId);
+            expect(application.status).to.equal(2); // Executed
+        });
+
+        it("Should correctly handle withdrawal state transition", async function () {
+            // Create application
+            const proposeTx = await agentRegistry.connect(user1).proposeAgent(agentId, "Test", "TST");
+            const proposeReceipt = await proposeTx.wait();
+            applicationId = proposeReceipt.events.find(e => e.event === "AgentProposed").args.proposalId;
+
+            // Withdraw application
+            await agentRegistry.connect(user1).withdraw(applicationId);
+            const application = await agentRegistry.getAgentApplication(agentId);
+            expect(application.status).to.equal(3); // Withdrawn
+            expect(application.withdrawableAmount).to.equal(0);
+        });
+    });
+
+    describe("Token System Parameter Validation", function () {
+        it("Should validate token system parameters", async function () {
+            const invalidParams = {
+                maxSupply: 0,
+                lpSupply: ethers.utils.parseEther("500000"),
+                vaultSupply: ethers.utils.parseEther("100000"),
+                maxTokensPerWallet: ethers.utils.parseEther("10000"),
+                maxTokensPerTxn: ethers.utils.parseEther("1000"),
+                botProtectionDurationInSeconds: 60,
+                vault: ethers.constants.AddressZero
+            };
+
+            await expect(
+                agentRegistry.setDefaultTokenParams(invalidParams)
+            ).to.be.reverted;
+
+            const validParams = {
+                maxSupply: ethers.utils.parseEther("1000000"),
+                lpSupply: ethers.utils.parseEther("500000"),
+                vaultSupply: ethers.utils.parseEther("100000"),
+                maxTokensPerWallet: ethers.utils.parseEther("10000"),
+                maxTokensPerTxn: ethers.utils.parseEther("1000"),
+                botProtectionDurationInSeconds: 60,
+                vault: owner.address
+            };
+
+            await expect(agentRegistry.setDefaultTokenParams(validParams))
+                .to.not.be.reverted;
+        });
+
+        it("Should validate token system configuration", async function () {
+            await expect(
+                agentRegistry.setTokenSystem(
+                    ethers.constants.AddressZero,
+                    mockAssetToken.address,
+                    mockRouter.address,
+                    applicationThreshold
+                )
+            ).to.be.reverted;
+
+            await expect(
+                agentRegistry.setTokenSystem(
+                    mockTokenImplementation.address,
+                    ethers.constants.AddressZero,
+                    mockRouter.address,
+                    applicationThreshold
+                )
+            ).to.be.reverted;
+
+            await expect(
+                agentRegistry.setTokenSystem(
+                    mockTokenImplementation.address,
+                    mockAssetToken.address,
+                    ethers.constants.AddressZero,
+                    applicationThreshold
+                )
+            ).to.be.reverted;
         });
     });
 }); 

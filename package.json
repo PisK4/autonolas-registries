@@ -18,7 +18,15 @@
     "blacklist:local": "cross-env COMMAND=blacklist hardhat run hackathon/scripts/manage.js --network localhost",
     "blacklist:sepolia": "cross-env COMMAND=blacklist hardhat run hackathon/scripts/manage.js --network sepolia",
     "withdraw:local": "cross-env COMMAND=withdraw hardhat run hackathon/scripts/manage.js --network localhost",
-    "withdraw:sepolia": "cross-env COMMAND=withdraw hardhat run hackathon/scripts/manage.js --network sepolia"
+    "withdraw:sepolia": "cross-env COMMAND=withdraw hardhat run hackathon/scripts/manage.js --network sepolia",
+    "token:setSystem:local": "cross-env COMMAND=setSystem hardhat run hackathon/scripts/token-system.js --network localhost",
+    "token:setSystem:sepolia": "cross-env COMMAND=setSystem hardhat run hackathon/scripts/token-system.js --network sepolia",
+    "token:setParams:local": "cross-env COMMAND=setParams hardhat run hackathon/scripts/token-system.js --network localhost",
+    "token:setParams:sepolia": "cross-env COMMAND=setParams hardhat run hackathon/scripts/token-system.js --network sepolia",
+    "gov:changeManager:local": "cross-env COMMAND=changeManager hardhat run hackathon/scripts/governance.js --network localhost",
+    "gov:changeManager:sepolia": "cross-env COMMAND=changeManager hardhat run hackathon/scripts/governance.js --network sepolia",
+    "gov:changeOwner:local": "cross-env COMMAND=changeOwner hardhat run hackathon/scripts/governance.js --network localhost",
+    "gov:changeOwner:sepolia": "cross-env COMMAND=changeOwner hardhat run hackathon/scripts/governance.js --network sepolia"
   },
   "repository": {
     "type": "git",
