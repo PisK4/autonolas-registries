@@ -4,7 +4,7 @@
 
 ### Component-Agent-Service 关系
 
-在Autonolas生态系统中，存在三个主要的构建块：Component、Agent和Service。它们形成了一个层级关系：
+存在三个主要的构建块：Component、Agent和Service。它们形成了一个层级关系：
 
 ```mermaid
 graph TD
@@ -63,6 +63,34 @@ Agent Registry是一个智能合约系统，用于管理AI代理的注册和生�
    - 交易参数配置
    - 机器人保护机制
 
+### Agent创建流程
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant AgentRegistry
+    participant ComponentRegistry
+    
+    User->>AgentRegistry: create(owner, hash, dependencies)
+    Note over AgentRegistry: 检查注册模式
+    
+    alt 开放注册模式
+        Note over AgentRegistry: 验证注册费用
+        Note over AgentRegistry: 检查黑名单
+    else 管理员模式
+        Note over AgentRegistry: 验证管理员权限
+    end
+    
+    AgentRegistry->>ComponentRegistry: 验证组件依赖
+    ComponentRegistry-->>AgentRegistry: 依赖验证结果
+    
+    Note over AgentRegistry: 创建Agent记录
+    Note over AgentRegistry: 铸造NFT
+    AgentRegistry-->>User: 返回AgentId
+    
+    Note over AgentRegistry: 发送CreateUnit事件
+```
+
 ## 功能模块
 
 ### 1. 注册管理
@@ -76,7 +104,7 @@ Agent Registry是一个智能合约系统，用于管理AI代理的注册和生�
 - 费用收取和提取
 - 黑名单管理
 
-### 2. Token系统
+### 2. Agent Token系统
 
 #### Token创建
 - 每个Agent可以创建专属Token
@@ -135,33 +163,6 @@ sequenceDiagram
     AgentRegistry-->>Developer: 完成
 ```
 
-### 3. Agent创建流程
-
-```mermaid
-sequenceDiagram
-    actor User
-    participant AgentRegistry
-    participant ComponentRegistry
-    
-    User->>AgentRegistry: create(owner, hash, dependencies)
-    Note over AgentRegistry: 检查注册模式
-    
-    alt 开放注册模式
-        Note over AgentRegistry: 验证注册费用
-        Note over AgentRegistry: 检查黑名单
-    else 管理员模式
-        Note over AgentRegistry: 验证管理员权限
-    end
-    
-    AgentRegistry->>ComponentRegistry: 验证组件依赖
-    ComponentRegistry-->>AgentRegistry: 依赖验证结果
-    
-    Note over AgentRegistry: 创建Agent记录
-    Note over AgentRegistry: 铸造NFT
-    AgentRegistry-->>User: 返回AgentId
-    
-    Note over AgentRegistry: 发送CreateUnit事件
-```
 
 ## 操作指南
 

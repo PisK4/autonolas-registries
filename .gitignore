@@ -10,3 +10,4 @@ leak_report
 # Hardhat files
 cache
 artifacts
+typechain-types

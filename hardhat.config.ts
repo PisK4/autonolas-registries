@@ -1,43 +1,42 @@
-/*global process*/
+import { HardhatUserConfig } from "hardhat/config";
+import "hardhat-contract-sizer";
+import "hardhat-gas-reporter";
+import "@nomicfoundation/hardhat-toolbox";
 
-require("hardhat-contract-sizer");
-//require("hardhat-deploy");
-//require("hardhat-deploy-ethers");
-require("hardhat-gas-reporter");
-//require("hardhat-tracer");
-require("@nomicfoundation/hardhat-chai-matchers");
-require("@nomiclabs/hardhat-ethers");
-require("@nomiclabs/hardhat-etherscan");
-require("@nomicfoundation/hardhat-toolbox");
-
-const ALCHEMY_API_KEY_MAINNET = process.env.ALCHEMY_API_KEY_MAINNET;
-const ALCHEMY_API_KEY_MATIC = process.env.ALCHEMY_API_KEY_MATIC;
-const ALCHEMY_API_KEY_SEPOLIA = process.env.ALCHEMY_API_KEY_SEPOLIA;
-const ALCHEMY_API_KEY_AMOY = process.env.ALCHEMY_API_KEY_AMOY;
+const ALCHEMY_API_KEY_MAINNET = process.env.ALCHEMY_API_KEY_MAINNET || "";
+const ALCHEMY_API_KEY_MATIC = process.env.ALCHEMY_API_KEY_MATIC || "";
+const ALCHEMY_API_KEY_SEPOLIA = process.env.ALCHEMY_API_KEY_SEPOLIA || "";
+const ALCHEMY_API_KEY_AMOY = process.env.ALCHEMY_API_KEY_AMOY || "";
 let TESTNET_MNEMONIC = process.env.TESTNET_MNEMONIC;
 
-const accounts = {
-    mnemonic: TESTNET_MNEMONIC,
+interface ExtendedHDAccountsConfig {
+    mnemonic: string;
+    path: string;
+    initialIndex: number;
+    count: number;
+    accountsBalance?: string;
+}
+
+const accounts: ExtendedHDAccountsConfig = {
+    mnemonic: TESTNET_MNEMONIC || "velvet deliver grief train result fortune travel voice over subject subject staff nominee bone name",
     path: "m/44'/60'/0'/0",
     initialIndex: 0,
     count: 20,
 };
 
 if (!TESTNET_MNEMONIC) {
-    // Generated with bip39
-    accounts.mnemonic = "velvet deliver grief train result fortune travel voice over subject subject staff nominee bone name";
     accounts.accountsBalance = "100000000000000000000000000";
 }
 
-const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY;
-const POLYGONSCAN_API_KEY = process.env.POLYGONSCAN_API_KEY;
-const GNOSISSCAN_API_KEY = process.env.GNOSISSCAN_API_KEY;
-const ARBISCAN_API_KEY = process.env.ARBISCAN_API_KEY;
-const OPSCAN_API_KEY = process.env.OPSCAN_API_KEY;
-const BASESCAN_API_KEY = process.env.BASESCAN_API_KEY;
-const CELOSCAN_API_KEY = process.env.CELOSCAN_API_KEY;
+const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY || "";
+const POLYGONSCAN_API_KEY = process.env.POLYGONSCAN_API_KEY || "";
+const GNOSISSCAN_API_KEY = process.env.GNOSISSCAN_API_KEY || "";
+const ARBISCAN_API_KEY = process.env.ARBISCAN_API_KEY || "";
+const OPSCAN_API_KEY = process.env.OPSCAN_API_KEY || "";
+const BASESCAN_API_KEY = process.env.BASESCAN_API_KEY || "";
+const CELOSCAN_API_KEY = process.env.CELOSCAN_API_KEY || "";
 
-module.exports = {
+const config: HardhatUserConfig = {
     networks: {
         local: {
             url: "http://localhost:8545",
@@ -260,5 +259,13 @@ module.exports = {
     },
     gasReporter: {
         enabled: true
+    },
+    typechain: {
+        outDir: "typechain-types",
+        target: "ethers-v6",
+        alwaysGenerateOverloads: false,
+        externalArtifacts: ["externalArtifacts/*.json"]
     }
 };
+
+export default config; 
