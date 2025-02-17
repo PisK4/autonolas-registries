@@ -45,25 +45,25 @@ COMMAND=changeOwner ADDR=<new_owner_address>     : Change contract owner
 
     try {
         switch (command) {
-            case "changeManager": {
-                const { ADDR } = process.env;
-                if (!ADDR) {
-                    throw new Error("Missing ADDR parameter for changeManager command");
-                }
-                await changeManager(agentRegistry, ADDR);
-                break;
+        case "changeManager": {
+            const { ADDR } = process.env;
+            if (!ADDR) {
+                throw new Error("Missing ADDR parameter for changeManager command");
             }
-            case "changeOwner": {
-                const { ADDR } = process.env;
-                if (!ADDR) {
-                    throw new Error("Missing ADDR parameter for changeOwner command");
-                }
-                await changeOwner(agentRegistry, ADDR);
-                break;
+            await changeManager(agentRegistry, ADDR);
+            break;
+        }
+        case "changeOwner": {
+            const { ADDR } = process.env;
+            if (!ADDR) {
+                throw new Error("Missing ADDR parameter for changeOwner command");
             }
-            default: {
-                throw new Error("Unknown command: " + command);
-            }
+            await changeOwner(agentRegistry, ADDR);
+            break;
+        }
+        default: {
+            throw new Error("Unknown command: " + command);
+        }
         }
     } catch (error) {
         console.error("Error:", error.message);

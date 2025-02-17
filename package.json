@@ -10,6 +10,8 @@
     "node": "hardhat node",
     "deploy:local": "hardhat run hackathon/scripts/deploy.js --network localhost",
     "deploy:sepolia": "hardhat run hackathon/scripts/deploy.js --network sepolia",
+    "verify:sepolia": "hardhat verify --network sepolia",
+    "verify:all:sepolia": "hardhat run hackathon/scripts/deploy.js --network sepolia",
     "manage": "hardhat run hackathon/scripts/manage.js",
     "setFee:local": "cross-env COMMAND=setFee hardhat run hackathon/scripts/manage.js --network localhost",
     "setFee:sepolia": "cross-env COMMAND=setFee hardhat run hackathon/scripts/manage.js --network sepolia",
@@ -26,7 +28,18 @@
     "gov:changeManager:local": "cross-env COMMAND=changeManager hardhat run hackathon/scripts/governance.js --network localhost",
     "gov:changeManager:sepolia": "cross-env COMMAND=changeManager hardhat run hackathon/scripts/governance.js --network sepolia",
     "gov:changeOwner:local": "cross-env COMMAND=changeOwner hardhat run hackathon/scripts/governance.js --network localhost",
-    "gov:changeOwner:sepolia": "cross-env COMMAND=changeOwner hardhat run hackathon/scripts/governance.js --network sepolia"
+    "gov:changeOwner:sepolia": "cross-env COMMAND=changeOwner hardhat run hackathon/scripts/governance.js --network sepolia",
+    "agent:create:local": "cross-env COMMAND=createAgent hardhat run hackathon/scripts/create-agent.js --network localhost",
+    "agent:create:sepolia": "cross-env COMMAND=createAgent hardhat run hackathon/scripts/create-agent.js --network sepolia",
+    "agent:createToken:local": "cross-env COMMAND=createToken hardhat run hackathon/scripts/create-agent.js --network localhost",
+    "agent:createToken:sepolia": "cross-env COMMAND=createToken hardhat run hackathon/scripts/create-agent.js --network sepolia",
+    "agent:createBoth:local": "cross-env COMMAND=createBoth hardhat run hackathon/scripts/create-agent.js --network localhost",
+    "agent:createBoth:sepolia": "cross-env COMMAND=createBoth hardhat run hackathon/scripts/create-agent.js --network sepolia",
+    "component:create:local": "hardhat run hackathon/scripts/create-component.js --network localhost",
+    "component:create:sepolia": "hardhat run hackathon/scripts/create-component.js --network sepolia",
+    "init:token:local": "hardhat run hackathon/scripts/init-mock-token.js --network localhost",
+    "init:token:sepolia": "hardhat run hackathon/scripts/init-mock-token.js --network sepolia",
+    "test:all:local": "pnpm run deploy:local && pnpm run component:create:local && pnpm run init:token:local && pnpm run agent:createBoth:local DEPS=1,2,3 NAME=Test SYMBOL=TST"
   },
   "repository": {
     "type": "git",
